@@ -1,6 +1,7 @@
-# render.yaml - defines backend (FastAPI) + frontend (Static Site)
+# render.yaml - Fixed version for new Render format
+
 services:
-  - type: web_service
+  - type: web
     name: ml-assistant-backend
     env: python
     plan: starter
@@ -8,10 +9,10 @@ services:
     startCommand: cd backend && uvicorn main:app --host 0.0.0.0 --port $PORT
     autoDeploy: true
 
-staticSites:
-  - type: static_site
+  - type: static
     name: ml-assistant-frontend
     branch: main
     publishPath: frontend
     buildCommand: ""
     autoDeploy: true
+
