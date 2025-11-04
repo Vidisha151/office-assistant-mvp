@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>ML Assistant — Demo</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body { font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; background:#f6f8fb; margin:0; padding:0; display:flex; min-height:100vh; align-items:center; justify-content:center; }
+    .app { width:720px; max-width:96%; background:white; border-radius:12px; box-shadow:0 8px 30px rgba(20,20,40,0.08); padding:20px; }
+    h1 { margin:0 0 12px 0; font-size:20px; }
+    .chat { height:360px; overflow:auto; border:1px solid #eef2f7; border-radius:8px; padding:12px; background:#fcfdff; }
+    .msg { margin:8px 0; }
+    .user { text-align:right; }
+    .bub { display:inline-block; padding:8px 12px; border-radius:12px; max-width:75%; }
+    .user .bub { background:#0b84ff; color:white; border-bottom-right-radius:4px; }
+    .bot .bub { background:#f1f5f9; color:#0b1722; border-bottom-left-radius:4px; }
+    .controls { display:flex; gap:8px; margin-top:12px; }
+    input[type="text"] { flex:1; padding:10px 12px; border-radius:8px; border:1px solid #e6eef8; font-size:14px; }
+    button { padding:10px 14px; border-radius:8px; border:0; background:#0b84ff; color:white; cursor:pointer; }
+    .small { font-size:13px; color:#6b7280; margin-top:8px; display:flex; gap:12px; align-items:center; }
+    .results { margin-top:10px; background:#fff; border-radius:8px; padding:8px; border:1px dashed #e6eef8; }
+    .intent-row { display:flex; justify-content:space-between; padding:6px 8px; border-radius:6px; margin:4px 0; background:#fbfdff; }
+    label { font-size:13px; color:#374151; }
+    .upload { display:flex; gap:8px; align-items:center; margin-top:10px; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <h1>ML Assistant — Demo</h1>
+
+    <div class="chat" id="chat">
+      <div class="msg bot">
+        <div class="bub">Hello! Type a message and press Send. I'll return top intents from the backend.</div>
+      </div>
+    </div>
+
+    <div class="controls">
+      <input id="query" type="text" placeholder="Type your message... (e.g., How do I reset my password?)" />
+      <button id="send">Send</button>
+    </div>
+
+    <div class="small">
+      <div>
+        <label>Top K:</label>
+        <select id="topk">
+          <option value="1">1</option>
+          <option value="3" selected>3</option>
+          <option value="5">5</option>
+        </select>
+      </div>
+
+      <div style="margin-left:auto">
+        <label>Backend URL:</label>
+        <input id="baseurl" type="text" value="http://127.0.0.1:8000" style="width:220px; padding:6px 8px; border-radius:6px; border:1px solid #e6eef8;"/>
+      </div>
+    </div>
+
+    <div class="upload">
+      <input type="file" id="csvfile" accept=".csv" />
+      <button id="uploadBtn">Upload intents.csv</button>
+      <div id="uploadMsg" style="font-size:13px;color:#374151;"></div>
+    </div>
+
+    <div class="results" id="results" aria-live="polite"></div>
+  </div>
+
+<script>
+  const chat = document.getElementById('chat');
+  const queryInput = document.getElementById('query');
+  const sendBtn = document.getElementById('send');
+  const topk = document.getElementById('topk');
+  const baseurl = document.getElementById('baseurl');
+  const resultsEl = document.getElementById('results');
+  const csvfile = document.getElementById('csvfile');
+  const uploadBtn = document.getElementById('uploadBtn');
+  const uploadMsg = document.getElementById('uploadMsg');
+
+  function appendMessage(text, who='bot') {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'msg ' + (who === 'user' ? 'user' : 'bot');
+    const bub = document.createElement('div');
+    bub.className = 'bub';
+    bub.innerText = text;
+    wrapper.appendChild(bub);
+    chat.appendChild(wrapper);
+    chat.scrollTop = chat.scrollHeight;
+  }
+
+  async function sendQuery() {
+    const q = queryInput.value.trim();
+    if (!q) return;
+    appendMessage(q, 'user');
+    appendMessage('Thinking...', 'bot');
+    const url = (baseurl.value || '').replace(/\/$/, '') + '/predict';
+    const body = { query: q, top_k: parseInt(topk.value || '3') };
+
+    try {
+      const r = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const textBub = chat.querySelectorAll('.bot .bub');
+      textBub[textBub.length - 1].innerText = ''; // clear 'Thinking...'
+
+      if (!r.ok) {
+        const err = await r.json().catch(()=>({detail:r.statusText}));
+        appendMessage('Error: ' + (err.detail || r.statusText || 'unknown'), 'bot');
+        return;
+      }
+      const data = await r.json();
+      if (!Array.isArray(data) || data.length === 0) {
+        appendMessage('No intents found.', 'bot');
+        resultsEl.innerHTML = '<em>No intents returned.</em>';
+        return;
+      }
+
+      // Show main bubble with top intent
+      appendMessage(`Top intent: ${data[0].intent} (score: ${data[0].score.toFixed(3)})`, 'bot');
+
+      // Show table below
+      resultsEl.innerHTML = '<strong>Top matches</strong>';
+      data.forEach(d => {
+        const row = document.createElement('div');
+        row.className = 'intent-row';
+        row.innerHTML = `<div style="font-weight:600">${d.intent}</div><div>${d.score.toFixed(3)}</div><div style="margin-left:12px;color:#6b7280">${d.text}</div>`;
+        resultsEl.appendChild(row);
+      });
+
+    } catch (e) {
+      // network error
+      appendMessage('Network error: ' + e.message, 'bot');
+    } finally {
+      queryInput.value = '';
+    }
+  }
+
+  sendBtn.addEventListener('click', sendQuery);
+  queryInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendQuery(); });
+
+  // upload CSV
+  uploadBtn.addEventListener('click', async () => {
+    const f = csvfile.files[0];
+    if (!f) { uploadMsg.innerText = 'Choose a CSV file first.'; return; }
+    uploadMsg.innerText = 'Uploading...';
+    const url = (baseurl.value || '').replace(/\/$/, '') + '/upload_intents';
+    const fd = new FormData();
+    fd.append('file', f, f.name);
+    try {
+      const r = await fetch(url, { method: 'POST', body: fd });
+      const j = await r.json();
+      if (!r.ok) {
+        uploadMsg.innerText = 'Upload failed: ' + (j.detail || r.statusText);
+      } else {
+        uploadMsg.innerText = `OK — ${j.num_examples} examples loaded.`;
+      }
+    } catch (err) {
+      uploadMsg.innerText = 'Upload error: ' + err.message;
+    }
+  });
+</script>
+</body>
+</html>

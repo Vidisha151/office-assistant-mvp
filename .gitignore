@@ -1,0 +1,17 @@
+# Ignore Python cache and temp files
+__pycache__/
+*.py[cod]
+
+# Ignore large model/index files
+*.joblib
+*.npy
+*.pkl
+
+# Ignore virtual environments
+venv/
+env/
+
+# Ignore system or IDE files
+.DS_Store
+Thumbs.db
+.vscode/
