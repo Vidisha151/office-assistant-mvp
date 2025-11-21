@@ -269,10 +269,6 @@ async def upload_intents(file: UploadFile = File(...)):
 # ----------------------
 # Run convenience (local dev)
 # ----------------------
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
-
 from fastapi.staticfiles import StaticFiles
 
 # Serve built React files
