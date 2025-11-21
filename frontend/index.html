@@ -408,7 +408,10 @@
        BACKEND INTERACTIONS
        ------------------------- */
     function getBackendBase() {
-      return (backendUrl || "").replace(/\/$/, "");
+      // Read the input directly so clicking Save is optional.
+      const val = (backendInput.value || "").trim();
+      if (val) return val.replace(/\/$/, "");
+      return backendUrl.replace(/\/$/, "");
     }
 
     // helper to call predict endpoint
@@ -471,7 +474,8 @@
        SMART chat: predict -> craft system prompt -> chat
        ------------------------- */
     async function smartChatSend(messageText) {
-      if (!backendUrl) { setStatus("Set backend URL first"); return; }
+      const base = getBackendBase();
+      if (!base) { setStatus("Set backend URL first"); alert("Set backend URL first"); return; }
       addMessage(messageText, "user");
       chatHistory.push({ role: "user", content: messageText });
       localStorage.setItem("chat_history_v1", JSON.stringify(chatHistory));
@@ -498,8 +502,6 @@
       const messagesForModel = [{ role: "system", content: systemPrompt }];
       // push previous pairs into history for context
       recentMessages.forEach(m => messagesForModel.push({ role: m.role, content: m.content }));
-      // lastly the user message (already included as last in recentMessages, but safe)
-      // messagesForModel.push({role:"user", content: messageText});
 
       setStatus("Generating reply...");
       // show streaming placeholder
@@ -519,6 +521,42 @@
     }
 
     /* -------------------------
+       REBUILD FROM PRELOADED (explicit function)
+       ------------------------- */
+    async function rebuildFromPreloaded() {
+      const base = getBackendBase();
+      if (!base) {
+        alert("Set backend URL first.");
+        setStatus("Set backend URL first");
+        return;
+      }
+
+      setStatus("Requesting server to build from preloaded CSV...");
+      try {
+        const res = await fetch(base + "/upload_intents", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: PRELOADED_CSV_PATH })
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          setStatus("Index built from preloaded CSV (" + (data.entries || "N/A") + ")");
+          addMessage("Index built on server from preloaded CSV.", "assistant");
+        } else {
+          const txt = await res.text();
+          setStatus("preload failed");
+          addMessage("Preload failed: " + txt, "assistant");
+          alert("Preload failed: " + txt);
+        }
+      } catch (e) {
+        setStatus("preload error");
+        addMessage("Preload error: " + e.message, "assistant");
+        alert("Preload error: " + e.message);
+      }
+    }
+
+    /* -------------------------
        UI EVENT BINDINGS
        ------------------------- */
     saveBtn.addEventListener("click", () => {
@@ -531,49 +569,23 @@
     filePicker.addEventListener("change", async (ev) => {
       const f = ev.target.files[0];
       if (!f) return;
-      if (!backendUrl) { setStatus("Set backend URL first"); return; }
+      const base = getBackendBase();
+      if (!base) { setStatus("Set backend URL first"); alert("Set backend URL first"); return; }
       setStatus("Uploading CSV...");
       const fd = new FormData();
       fd.append("file", f, f.name);
       try {
-        const res = await fetch(getBackendBase() + "/upload_intents", { method: "POST", body: fd });
+        const res = await fetch(base + "/upload_intents", { method: "POST", body: fd });
         const data = await res.json();
         if (res.ok) { setStatus("Index built: " + (data.entries || 0)); addMessage("Index built on server.", "assistant"); }
-        else { setStatus("Upload failed"); addMessage("Upload failed: " + JSON.stringify(data), "assistant"); }
+        else { setStatus("Upload failed"); addMessage("Upload failed: " + JSON.stringify(data), "assistant"); alert("Upload failed: " + JSON.stringify(data)); }
       } catch (e) {
-        setStatus("upload error"); addMessage("Upload error: " + e.message, "assistant");
+        setStatus("upload error"); addMessage("Upload error: " + e.message, "assistant"); alert("Upload error: " + e.message);
       }
     });
 
-    usePreloadedBtn.addEventListener("click", async () => {
-      // We post JSON { url: PRELOADED_CSV_PATH } to /upload_intents.
-      // Server must accept JSON body and fetch the URL path; if not, this may fail.
-      if (!backendUrl) { setStatus("Set backend URL first"); return; }
-      setStatus("Requesting server to build from preloaded CSV...");
-      try {
-        const res = await fetch(getBackendBase() + "/upload_intents", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url: PRELOADED_CSV_PATH })
-        });
-        if (res.ok) {
-          const data = await res.json();
-          setStatus("Index built from preloaded CSV (" + (data.entries || "N/A") + ")");
-          addMessage("Index built on server from preloaded CSV.", "assistant");
-        } else {
-          const txt = await res.text();
-          setStatus("preload failed");
-          addMessage("Preload failed: " + txt, "assistant");
-        }
-      } catch (e) {
-        setStatus("preload error"); addMessage("Preload error: " + e.message, "assistant");
-      }
-    });
-
-    rebuildIndexBtn.addEventListener("click", async () => {
-      // same as usePreloaded but explicit
-      usePreloadedBtn.click();
-    });
+    usePreloadedBtn.addEventListener("click", () => rebuildFromPreloaded());
+    rebuildIndexBtn.addEventListener("click", () => rebuildFromPreloaded());
 
     sendBtn.addEventListener("click", () => {
       const txt = input.value.trim();
