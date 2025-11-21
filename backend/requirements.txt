@@ -1,0 +1,10 @@
+@"
+uvicorn[standard]
+sentence-transformers
+faiss-cpu
+joblib
+python-multipart
+dateparser
+pandas
+scikit-learn
+"@ > backend\requirements.txt
