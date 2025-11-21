@@ -18,9 +18,17 @@ RUN pip install --no-cache-dir fastapi "uvicorn[standard]" python-dateutil pydan
 RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
 RUN pip install --no-cache-dir transformers sentence-transformers faiss-cpu tqdm
 
-# Project files
+# -----------------------
+# Copy backend + ALL model/index files
+# -----------------------
 COPY backend/ /app/backend/
-COPY intents.csv /app/intents.csv
+
+# If you keep your index files outside backend, copy them too
+COPY intents.csv /app/backend/intents.csv
+COPY backend/embeddings.npy /app/backend/embeddings.npy
+COPY backend/metadata.joblib /app/backend/metadata.joblib
+
+# Copy frontend
 COPY frontend/ /app/frontend_build/
 
 WORKDIR /app/backend
