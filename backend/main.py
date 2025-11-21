@@ -12,265 +12,295 @@ Features:
     POST /upload_intents   -> multipart file (CSV)
 - Persists index/embeddings & metadata to joblib files for faster restarts.
 """
-from fastapi import FastAPI, UploadFile, File, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import List, Dict
+# backend/main.py
+"""
+Full main.py for Office Assistant MVP
+- Intent prediction using embeddings + faiss
+- Upload CSV to build index on the fly
+- /chat endpoint that uses OpenAI Chat API (OPENAI_API_KEY)
+- Serves frontend from ../frontend_build
+Notes:
+ - Dockerfile should run: uvicorn main:app --host 0.0.0.0 --port $PORT
+ - Do NOT include uvicorn.run() here (deployment uses Docker/uvicorn)
+"""
+
 import os
-import joblib
-import pandas as pd
+import io
+import csv
+import json
+from typing import List, Optional, Dict, Any
+
 import numpy as np
+import joblib
+from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
-# lazy import for heavy libs
-try:
-    from sentence_transformers import SentenceTransformer
-except Exception as e:
-    SentenceTransformer = None
-
-# Try to import faiss; if not present, we'll fallback to sklearn
-HAS_FAISS = True
+# Optional libraries
 try:
     import faiss
 except Exception:
-    HAS_FAISS = False
+    faiss = None
 
-# sklearn fallback
-from sklearn.neighbors import NearestNeighbors
+try:
+    from sentence_transformers import SentenceTransformer
+except Exception:
+    SentenceTransformer = None
 
-# ----------------------
-# Config & paths
-# ----------------------
-INTENTS_CSV = "intents.csv"
-INDEX_FILE = "faiss_index.joblib"         # used only if faiss present
-EMBEDDINGS_FILE = "embeddings.npy"       # fallback storage for sklearn or general use
-METADATA_FILE = "metadata.joblib"
-EMBEDDING_MODEL_NAME = "all-MiniLM-L6-v2"
-EMBEDDING_DIM = 384  # this model's embedding dim
+# OpenAI
+try:
+    import openai
+except Exception:
+    openai = None
 
-# ----------------------
-# FastAPI app
-# ----------------------
-app = FastAPI(title="ML Assistant Backend")
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# App
+app = FastAPI(title="Office Assistant MVP")
 
-# ----------------------
-# Request/Response models
-# ----------------------
-class PredictRequest(BaseModel):
-    query: str
-    top_k: int = 3
+# Paths (adjust if needed)
+APP_ROOT = os.path.dirname(os.path.abspath(__file__))   # backend/
+INTENTS_CSV = os.path.join(APP_ROOT, "intents.csv")
+EMB_PATH = os.path.join(APP_ROOT, "embeddings.npy")
+META_PATH = os.path.join(APP_ROOT, "metadata.joblib")
+FRONTEND_DIR = os.path.join(os.path.dirname(APP_ROOT), "frontend_build")  # ../frontend_build
 
-class PredictResult(BaseModel):
-    intent: str
-    text: str
-    score: float
+# Mount frontend (serves index.html)
+if os.path.isdir(FRONTEND_DIR):
+    app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
 
-# ----------------------
-# Globals
-# ----------------------
-model = None
-faiss_index = None
-sk_index = None  # sklearn NearestNeighbors fallback
-embeddings = None  # numpy array (N x D)
-metadata: List[Dict] = []
 
-# ----------------------
-# Helpers
-# ----------------------
-def ensure_model_loaded():
-    global model
-    if model is None:
-        if SentenceTransformer is None:
-            raise HTTPException(status_code=500, detail="sentence-transformers not installed.")
-        model = SentenceTransformer(EMBEDDING_MODEL_NAME)
-
-def try_load_persisted():
+# ---------------------------
+# Utilities: load / save index
+# ---------------------------
+def load_index():
     """
-    Load persisted data if present:
-      - If faiss is available and INDEX_FILE exists, try loading it.
-      - Load embeddings.npy and metadata.joblib if present (sklearn fallback).
+    Load embeddings and metadata from disk. Returns (embeddings_np, metadata_dict)
+    metadata expected format: {'texts': [...], 'intents': [...]} or similar
     """
-    global faiss_index, embeddings, metadata, sk_index
+    if not os.path.exists(EMB_PATH) or not os.path.exists(META_PATH):
+        return None, None
 
-    if HAS_FAISS and os.path.exists(INDEX_FILE) and os.path.exists(METADATA_FILE):
-        try:
-            faiss_index = joblib.load(INDEX_FILE)
-            metadata = joblib.load(METADATA_FILE)
-            return True
-        except Exception:
-            pass
+    embeddings = np.load(EMB_PATH)
+    metadata = joblib.load(META_PATH)
+    return embeddings, metadata
 
-    if os.path.exists(EMBEDDINGS_FILE) and os.path.exists(METADATA_FILE):
-        try:
-            embeddings = np.load(EMBEDDINGS_FILE)
-            metadata = joblib.load(METADATA_FILE)
-            # build sklearn index
-            if embeddings is not None and len(embeddings) > 0:
-                sk_index = NearestNeighbors(n_neighbors=5, metric="cosine")
-                sk_index.fit(embeddings)
-            return True
-        except Exception:
-            pass
 
-    return False
+def save_index(embeddings: np.ndarray, metadata: dict):
+    np.save(EMB_PATH, embeddings)
+    joblib.dump(metadata, META_PATH)
 
-def build_index_from_dataframe(df: pd.DataFrame):
+
+def build_index_from_csv(csv_path: str, model_name: str = "all-MiniLM-L6-v2"):
     """
-    Build index and persist it. Expects 'intent' and 'text' columns.
+    Build embeddings + metadata from CSV file.
+    CSV must contain a text column (tries common column names otherwise uses first column)
+    Returns (embeddings, metadata)
     """
-    global faiss_index, embeddings, metadata, sk_index
-    if "text" not in df.columns or "intent" not in df.columns:
-        raise ValueError("CSV must contain 'intent' and 'text' columns")
+    if SentenceTransformer is None:
+        raise RuntimeError("sentence-transformers not installed in the environment. Install it or upload index files.")
 
-    texts = df["text"].astype(str).tolist()
-    intents = df["intent"].astype(str).tolist()
+    # load CSV
+    import pandas as pd
+    df = pd.read_csv(csv_path)
+    # find best text column
+    text_col = None
+    for c in ["text", "utterance", "query", "sentence", "content", "prompt"]:
+        if c in df.columns:
+            text_col = c
+            break
+    if text_col is None:
+        text_col = df.columns[0]
 
-    ensure_model_loaded()
-    embs = model.encode(texts, show_progress_bar=True, convert_to_numpy=True)
-    if embs.ndim == 1:
-        embs = embs.reshape(1, -1)
+    texts = df[text_col].astype(str).tolist()
+    # optional: get intents column if present
+    intents = df["intent"].astype(str).tolist() if "intent" in df.columns else None
 
-    metadata = [{"intent": intents[i], "text": texts[i]} for i in range(len(texts))]
+    # create embeddings
+    model = SentenceTransformer(model_name)
+    embeddings = model.encode(texts, show_progress_bar=False)
+    metadata = {"texts": texts}
+    if intents is not None:
+        metadata["intents"] = intents
+    metadata["columns"] = list(df.columns)
+    return embeddings, metadata
 
-    # Persist embeddings & metadata
-    np.save(EMBEDDINGS_FILE, embs)
-    joblib.dump(metadata, METADATA_FILE)
 
-    # Build index
-    if HAS_FAISS:
-        # normalize for inner product (cosine-like)
-        faiss.normalize_L2(embs)
-        d = embs.shape[1]
-        index = faiss.IndexFlatIP(d)
-        index.add(embs)
-        faiss_index = index
-        # persist faiss index using joblib
-        joblib.dump(faiss_index, INDEX_FILE)
-        # keep embeddings var too
-        embeddings = embs
-        sk_index = None
+# ---------------------------
+# Search helper (faiss or brute)
+# ---------------------------
+def knn_search(embeddings: np.ndarray, query_emb: np.ndarray, top_k: int = 3):
+    # embeddings: N x D, query_emb: D or 1 x D
+    if faiss is not None:
+        d = embeddings.shape[1]
+        index = faiss.IndexFlatIP(d)  # inner product (we'll normalize)
+        # normalize if necessary
+        # convert to float32
+        emb32 = embeddings.astype("float32")
+        # normalize vectors for cosine similarity
+        faiss.normalize_L2(emb32)
+        index.add(emb32)
+        q = query_emb.astype("float32")
+        faiss.normalize_L2(q)
+        distances, indices = index.search(np.atleast_2d(q), top_k)
+        # distances are similarity scores (since normalized + IP)
+        return indices[0].tolist(), distances[0].tolist()
     else:
-        # sklearn fallback: NearestNeighbors with cosine distance
-        sk = NearestNeighbors(n_neighbors=min(10, len(embs)), metric="cosine")
-        sk.fit(embs)
-        sk_index = sk
-        embeddings = embs
-        faiss_index = None
+        # fallback: brute-force cosine
+        from numpy.linalg import norm
+        # ensure 2D
+        q = np.asarray(query_emb).reshape(-1)
+        emb = np.asarray(embeddings)
+        # normalize
+        emb_norm = emb / (np.linalg.norm(emb, axis=1, keepdims=True) + 1e-12)
+        q_norm = q / (np.linalg.norm(q) + 1e-12)
+        sims = np.dot(emb_norm, q_norm)
+        idx = np.argsort(-sims)[:top_k]
+        return idx.tolist(), sims[idx].tolist()
 
-def ensure_index():
-    """
-    Ensure an index (faiss or sklearn) is ready. Tries to load persisted index, else builds from CSV.
-    """
-    global faiss_index, sk_index, metadata, embeddings
-    if faiss_index is not None or sk_index is not None:
-        return
-    if try_load_persisted():
-        return
-    if os.path.exists(INTENTS_CSV):
-        df = pd.read_csv(INTENTS_CSV)
-        build_index_from_dataframe(df)
 
-def search(query: str, top_k: int = 3) -> List[PredictResult]:
-    """
-    Search the index and return PredictResult list.
-    Scores are cosine-similarity-like (higher = better).
-    """
-    ensure_model_loaded()
-    ensure_index()
+# ---------------------------
+# Intent prediction endpoint
+# ---------------------------
+class PredictRequest(BaseModel):
+    text: str
+    top_k: Optional[int] = 3
 
-    if faiss_index is not None:
-        q_emb = model.encode([query], convert_to_numpy=True)
-        faiss.normalize_L2(q_emb)
-        D, I = faiss_index.search(q_emb, top_k)
-        results = []
-        for score, idx in zip(D[0], I[0]):
-            if idx < 0 or idx >= len(metadata):
-                continue
-            md = metadata[idx]
-            results.append(PredictResult(intent=md["intent"], text=md["text"], score=float(score)))
-        return results
 
-    if sk_index is not None and embeddings is not None:
-        q_emb = model.encode([query], convert_to_numpy=True)
-        # sklearn returns distances (cosine): distance in [0, 2]; similarity = 1 - distance
-        distances, indices = sk_index.kneighbors(q_emb, n_neighbors=min(top_k, len(embeddings)))
-        results = []
-        for dist, idx in zip(distances[0], indices[0]):
-            score = 1.0 - float(dist)  # convert to similarity-like
-            md = metadata[idx]
-            results.append(PredictResult(intent=md["intent"], text=md["text"], score=score))
-        return results
+@app.post("/predict")
+async def predict(req: PredictRequest):
+    # load index
+    embeddings, metadata = load_index()
+    if embeddings is None or metadata is None:
+        # try to build from backend/intents.csv if present
+        # fallback path /mnt/data/intent.csv (uploaded to chat) is also tested
+        fallback_csv = None
+        if os.path.exists(INTENTS_CSV):
+            fallback_csv = INTENTS_CSV
+        elif os.path.exists("/mnt/data/intent.csv"):
+            fallback_csv = "/mnt/data/intent.csv"
+        if fallback_csv:
+            try:
+                embeddings, metadata = build_index_from_csv(fallback_csv)
+                save_index(embeddings, metadata)
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"No index available and failed to build: {e}")
+        else:
+            raise HTTPException(status_code=404, detail="No index available. Upload intents or place intents.csv in backend/")
 
-    raise HTTPException(status_code=500, detail="No index available. Upload intents or place intents.csv in backend/")
+    # vectorize incoming text
+    if SentenceTransformer is None:
+        raise HTTPException(status_code=500, detail="sentence-transformers not installed on server for encoding. Provide precomputed embeddings.")
+    model = SentenceTransformer("all-MiniLM-L6-v2")
+    q_emb = model.encode([req.text])[0]
 
-# ----------------------
-# Startup: try to load index (non-fatal)
-# ----------------------
-@app.on_event("startup")
-def startup_event():
-    # do not raise on failure; server should still start
-    try:
-        ensure_model_loaded()
-    except Exception as e:
-        print("Warning: model not loaded on startup:", str(e))
-    try:
-        ensure_index()
-    except Exception as e:
-        print("Warning: index not built/loaded on startup:", str(e))
+    # search
+    idxs, scores = knn_search(embeddings, q_emb, top_k=req.top_k or 3)
 
-# ----------------------
-# Routes
-# ----------------------
-@app.get("/health")
-def health():
-    return {
-        "status": "ok",
-        "model_loaded": model is not None,
-        "faiss_available": HAS_FAISS,
-        "index_built": (faiss_index is not None) or (sk_index is not None)
-    }
+    results = []
+    for i, s in zip(idxs, scores):
+        text = metadata.get("texts", [])[i] if "texts" in metadata else ""
+        intent = metadata.get("intents", [])[i] if "intents" in metadata else None
+        results.append({"index": int(i), "text": text, "intent": intent, "score": float(s)})
+    return {"query": req.text, "results": results}
 
-@app.get("/metadata")
-def get_metadata():
-    return {"count": len(metadata), "samples": metadata[:20]}
 
-@app.post("/predict", response_model=List[PredictResult])
-def predict(req: PredictRequest):
-    if not req.query or req.query.strip() == "":
-        raise HTTPException(status_code=400, detail="Query must be a non-empty string")
-    results = search(req.query, top_k=req.top_k)
-    return results
-
+# ---------------------------
+# Upload CSV endpoint (build index server-side)
+# ---------------------------
 @app.post("/upload_intents")
 async def upload_intents(file: UploadFile = File(...)):
-    if not file.filename.endswith(".csv"):
-        raise HTTPException(status_code=400, detail="Only CSV files are accepted")
+    """
+    Accept a CSV file with at least one text column. Builds embeddings & saves embeddings.npy + metadata.joblib
+    """
     contents = await file.read()
-    from io import StringIO
+    # write to temp path and build
+    tmp_path = os.path.join(APP_ROOT, "uploaded_intents.csv")
+    with open(tmp_path, "wb") as f:
+        f.write(contents)
+
     try:
-        df = pd.read_csv(StringIO(contents.decode("utf-8")))
+        embeddings, metadata = build_index_from_csv(tmp_path)
+        save_index(embeddings, metadata)
+        return {"status": "ok", "message": "Index built and saved", "entries": len(metadata.get("texts", []))}
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Could not parse CSV: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to build index: {e}")
 
-    if "intent" not in df.columns or "text" not in df.columns:
-        raise HTTPException(status_code=400, detail="CSV must have 'intent' and 'text' columns")
 
-    # save CSV and rebuild index
-    df.to_csv(INTENTS_CSV, index=False)
-    build_index_from_dataframe(df)
-    return {"status": "ok", "num_examples": len(df)}
+# ---------------------------
+# Chat endpoint using OpenAI
+# ---------------------------
+# Pydantic models for chat
+class ChatMessage(BaseModel):
+    role: str  # "system" | "user" | "assistant"
+    content: str
 
-# ----------------------
-# Run convenience (local dev)
-# ----------------------
-from fastapi.staticfiles import StaticFiles
 
-# Serve built React files
+class ChatRequest(BaseModel):
+    messages: List[ChatMessage]
+    max_tokens: Optional[int] = 256
+    model: Optional[str] = "gpt-4o-mini"  # use appropriate available model
 
-app.mount("/", StaticFiles(directory="/app/frontend_build", html=True), name="frontend")
+
+# configure OpenAI key from env
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENAI_KEY") or None
+if openai is not None and OPENAI_API_KEY:
+    openai.api_key = OPENAI_API_KEY
+
+
+def openai_chat_reply(messages: List[Dict[str, str]], model: str = "gpt-4o-mini", max_tokens: int = 256):
+    if openai is None:
+        return "OpenAI library not installed on server."
+
+    if not OPENAI_API_KEY:
+        return "OpenAI API key not configured. Set OPENAI_API_KEY in environment."
+
+    # Use ChatCompletion (legacy compat) or chat endpoint depending on openai version
+    try:
+        # Newer openai versions: openai.ChatCompletion.create(...)
+        resp = openai.ChatCompletion.create(
+            model=model,
+            messages=messages,
+            max_tokens=max_tokens,
+            temperature=0.2,
+        )
+        if resp and "choices" in resp and len(resp["choices"]) > 0:
+            return resp["choices"][0]["message"]["content"]
+        return ""
+    except Exception as e:
+        # return error text for debugging
+        raise RuntimeError(f"OpenAI request failed: {e}")
+
+
+@app.post("/chat")
+async def chat_endpoint(req: ChatRequest):
+    try:
+        # prepare messages for OpenAI
+        msgs = [{"role": m.role, "content": m.content} for m in req.messages]
+        reply_text = openai_chat_reply(msgs, model=req.model or "gpt-4o-mini", max_tokens=req.max_tokens or 256)
+        return {"reply": reply_text}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------
+# Health / simple endpoints
+# ---------------------------
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
+
+
+@app.get("/info")
+async def info():
+    emb_exists = os.path.exists(EMB_PATH)
+    meta_exists = os.path.exists(META_PATH)
+    return {
+        "embeddings": "present" if emb_exists else "missing",
+        "metadata": "present" if meta_exists else "missing",
+        "frontend": FRONTEND_DIR if os.path.isdir(FRONTEND_DIR) else "missing",
+        "faiss": faiss is not None,
+        "sentence_transformers": SentenceTransformer is not None,
+        "openai": openai is not None,
+    }
+
+# Note: Do not add uvicorn.run() here. Start via CLI or Dockerfile as intended.
