@@ -84,9 +84,9 @@ WORKDIR /app/backend
 
 # Expose port and run via python -m uvicorn to avoid PATH issues
 ENV PORT=8000
-EXPOSE 8000
+EXPOSE 8080
 
 # Command: run uvicorn module app:app (adjust if your app is named differently)
 WORKDIR /app/backend
-CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
 
