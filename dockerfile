@@ -83,7 +83,7 @@ COPY frontend/ ./frontend_build/
 WORKDIR /app/backend
 
 # Expose port and run via python -m uvicorn to avoid PATH issues
-ENV PORT=8000
+ENV PORT=8080
 EXPOSE 8080
 
 # Command: run uvicorn module app:app (adjust if your app is named differently)
