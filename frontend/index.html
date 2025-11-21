@@ -3,268 +3,608 @@
 
 <head>
   <meta charset="utf-8" />
-  <title>ML Assistant — Demo</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Office Assistant — Chat (Streaming + Memory)</title>
   <style>
+    :root {
+      --bg: #f5f7fb;
+      --card: #fff;
+      --muted: #6b7280;
+      --accent: #0366d6;
+      --send: #10b981;
+      --user-bg: var(--accent);
+      --user-color: #fff;
+      --assistant-bg: #f1f5f9;
+      --assistant-color: #111;
+    }
+
+    html,
     body {
-      font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
-      background: #f6f8fb;
+      height: 100%;
       margin: 0;
-      padding: 0;
-      display: flex;
-      min-height: 100vh;
-      align-items: center;
-      justify-content: center;
+      font-family: Inter, system-ui, Segoe UI, Roboto, Arial;
+      background: var(--bg);
+      color: #111
     }
 
     .app {
-      width: 720px;
-      max-width: 96%;
-      background: white;
+      max-width: 980px;
+      margin: 28px auto;
+      background: var(--card);
       border-radius: 12px;
-      box-shadow: 0 8px 30px rgba(20, 20, 40, 0.08);
-      padding: 20px;
+      box-shadow: 0 10px 30px rgba(20, 20, 40, 0.08);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      height: 84vh;
     }
 
-    h1 {
-      margin: 0 0 12px 0;
-      font-size: 20px;
+    header {
+      padding: 14px 18px;
+      border-bottom: 1px solid #eee;
+      display: flex;
+      align-items: center;
+      gap: 12px
     }
 
-    .chat {
-      height: 360px;
-      overflow: auto;
-      border: 1px solid #eef2f7;
-      border-radius: 8px;
-      padding: 12px;
-      background: #fcfdff;
-    }
-
-    .msg {
-      margin: 8px 0;
-    }
-
-    .user {
-      text-align: right;
-    }
-
-    .bub {
-      display: inline-block;
-      padding: 8px 12px;
-      border-radius: 12px;
-      max-width: 75%;
-    }
-
-    .user .bub {
-      background: #0b84ff;
-      color: white;
-      border-bottom-right-radius: 4px;
-    }
-
-    .bot .bub {
-      background: #f1f5f9;
-      color: #0b1722;
-      border-bottom-left-radius: 4px;
+    header h1 {
+      margin: 0;
+      font-size: 18px
     }
 
     .controls {
+      margin-left: auto;
       display: flex;
       gap: 8px;
-      margin-top: 12px;
+      align-items: center
     }
 
-    input[type="text"] {
-      flex: 1;
-      padding: 10px 12px;
-      border-radius: 8px;
-      border: 1px solid #e6eef8;
-      font-size: 14px;
+    .controls input[type="text"] {
+      width: 380px;
+      padding: 8px 10px;
+      border: 1px solid #ddd;
+      border-radius: 8px
     }
 
-    button {
-      padding: 10px 14px;
-      border-radius: 8px;
+    .controls button {
+      padding: 8px 10px;
       border: 0;
-      background: #0b84ff;
+      background: var(--accent);
       color: white;
-      cursor: pointer;
+      border-radius: 8px;
+      cursor: pointer
+    }
+
+    .controls button.secondary {
+      background: #6b7280
+    }
+
+    main {
+      display: flex;
+      gap: 12px;
+      padding: 14px;
+      flex: 1;
+      overflow: hidden
+    }
+
+    .left {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 12px
+    }
+
+    .status {
+      font-size: 13px;
+      color: var(--muted);
+      padding-left: 6px
+    }
+
+    .messages {
+      flex: 1;
+      overflow: auto;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px
+    }
+
+    .msg {
+      max-width: 78%;
+      padding: 12px 14px;
+      border-radius: 12px;
+      line-height: 1.45;
+      word-wrap: break-word;
+      white-space: pre-wrap
+    }
+
+    .msg.user {
+      align-self: flex-end;
+      background: var(--user-bg);
+      color: var(--user-color);
+      border-bottom-right-radius: 6px
+    }
+
+    .msg.assistant {
+      align-self: flex-start;
+      background: var(--assistant-bg);
+      color: var(--assistant-color);
+      border-bottom-left-radius: 6px
+    }
+
+    .meta {
+      font-size: 12px;
+      color: var(--muted);
+      margin-left: 6px
+    }
+
+    footer {
+      padding: 12px;
+      border-top: 1px solid #eee;
+      display: flex;
+      gap: 8px;
+      align-items: flex-end
+    }
+
+    textarea {
+      flex: 1;
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 10px;
+      min-height: 56px;
+      resize: vertical;
+      font-size: 14px
+    }
+
+    .send {
+      padding: 10px 14px;
+      background: var(--send);
+      color: white;
+      border-radius: 10px;
+      border: 0;
+      cursor: pointer
+    }
+
+    .sidebar {
+      width: 300px;
+      border-left: 1px solid #eee;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px
     }
 
     .small {
       font-size: 13px;
-      color: #6b7280;
-      margin-top: 8px;
-      display: flex;
-      gap: 12px;
-      align-items: center;
+      color: var(--muted)
     }
 
-    .results {
-      margin-top: 10px;
-      background: #fff;
-      border-radius: 8px;
-      padding: 8px;
-      border: 1px dashed #e6eef8;
-    }
-
-    .intent-row {
-      display: flex;
-      justify-content: space-between;
-      padding: 6px 8px;
-      border-radius: 6px;
-      margin: 4px 0;
-      background: #fbfdff;
-    }
-
-    label {
-      font-size: 13px;
-      color: #374151;
-    }
-
-    .upload {
+    .row {
       display: flex;
       gap: 8px;
-      align-items: center;
-      margin-top: 10px;
+      align-items: center
+    }
+
+    .spinner {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      border: 2px solid rgba(0, 0, 0, 0.12);
+      border-top-color: var(--accent);
+      animation: spin .9s linear infinite;
+      display: inline-block
+    }
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg)
+      }
+    }
+
+    .history-item {
+      padding: 8px;
+      border-radius: 8px;
+      background: #f8fafc;
+      cursor: pointer;
+      font-size: 13px;
+    }
+
+    .history-item:hover {
+      background: #eef2ff
+    }
+
+    .btn {
+      padding: 8px 10px;
+      border-radius: 8px;
+      border: 0;
+      background: var(--accent);
+      color: white;
+      cursor: pointer
+    }
+
+    .btn.ghost {
+      background: transparent;
+      color: var(--accent);
+      border: 1px solid #e6eefc
+    }
+
+    .muted {
+      color: var(--muted)
     }
   </style>
 </head>
 
 <body>
-  <div class="app">
-    <h1>ML Assistant — Demo</h1>
-
-    <div class="chat" id="chat">
-      <div class="msg bot">
-        <div class="bub">Hello! Type a message and press Send. I'll return top intents from the backend.</div>
+  <div class="app" role="application" aria-label="Office Assistant Chat">
+    <header>
+      <h1>Office Assistant — Chat</h1>
+      <div class="controls" aria-hidden="false">
+        <input id="backend-url" type="text" placeholder="Backend URL (e.g. https://...up.railway.app)"
+          aria-label="Backend URL" />
+        <button id="save-backend" class="secondary">Save</button>
+        <input id="file-picker" type="file" accept=".csv" style="display:none" />
+        <button id="upload-btn" class="btn">Upload intents.csv</button>
+        <button id="use-preloaded" class="btn ghost" title="Use server-side preloaded CSV">Use preloaded
+          intents</button>
       </div>
-    </div>
+    </header>
 
-    <div class="controls">
-      <input id="query" type="text" placeholder="Type your message... (e.g., How do I reset my password?)" />
-      <button id="send">Send</button>
-    </div>
-
-    <div class="small">
-      <div>
-        <label>Top K:</label>
-        <select id="topk">
-          <option value="1">1</option>
-          <option value="3" selected>3</option>
-          <option value="5">5</option>
-        </select>
+    <main>
+      <div class="left">
+        <div class="status" id="status">Status: idle</div>
+        <div class="messages" id="messages" role="log" aria-live="polite" tabindex="0"></div>
+        <footer>
+          <textarea id="message-input"
+            placeholder="Type your message... (Shift+Enter new line, Enter to send)"></textarea>
+          <button id="send" class="send">Send</button>
+        </footer>
       </div>
 
-      <div style="margin-left:auto">
-        <label>Backend URL:</label>
-        <input id="baseurl" type="text" value="https://office-assistant-mvp-production.up.railway.app"
-          style="width:220px; padding:6px 8px; border-radius:6px; border:1px solid #e6eef8;" />
-      </div>
-    </div>
+      <aside class="sidebar" aria-label="Sidebar">
+        <div>
+          <div class="small"><strong>Conversation memory</strong></div>
+          <div class="small muted">Saved locally in your browser. Click an item to load.</div>
+          <div id="history-list" style="margin-top:8px; display:flex;flex-direction:column; gap:8px;"></div>
+          <div style="margin-top:10px; display:flex; gap:8px;">
+            <button id="save-memory" class="btn ghost">Save memory</button>
+            <button id="clear-memory" class="btn ghost">Clear memory</button>
+          </div>
+        </div>
 
-    <div class="upload">
-      <input type="file" id="csvfile" accept=".csv" />
-      <button id="uploadBtn">Upload intents.csv</button>
-      <div id="uploadMsg" style="font-size:13px;color:#374151;"></div>
-    </div>
-
-    <div class="results" id="results" aria-live="polite"></div>
+        <div style="margin-top:14px;">
+          <div class="small"><strong>Quick actions</strong></div>
+          <div style="margin-top:8px; display:flex; flex-direction:column; gap:8px;">
+            <button id="clear-chat" class="btn ghost">Clear chat</button>
+            <button id="rebuild-index" class="btn">Rebuild index from preloaded CSV</button>
+            <button id="download-log" class="btn ghost">Download conversation</button>
+          </div>
+        </div>
+      </aside>
+    </main>
   </div>
 
   <script>
-    const chat = document.getElementById('chat');
-    const queryInput = document.getElementById('query');
-    const sendBtn = document.getElementById('send');
-    const topk = document.getElementById('topk');
-    const baseurl = document.getElementById('baseurl');
-    const resultsEl = document.getElementById('results');
-    const csvfile = document.getElementById('csvfile');
-    const uploadBtn = document.getElementById('uploadBtn');
-    const uploadMsg = document.getElementById('uploadMsg');
+    /* -------------------------
+       CONFIG & INITIALIZATION
+       ------------------------- */
 
-    function appendMessage(text, who = 'bot') {
-      const wrapper = document.createElement('div');
-      wrapper.className = 'msg ' + (who === 'user' ? 'user' : 'bot');
-      const bub = document.createElement('div');
-      bub.className = 'bub';
-      bub.innerText = text;
-      wrapper.appendChild(bub);
-      chat.appendChild(wrapper);
-      chat.scrollTop = chat.scrollHeight;
+    const DEFAULT_BACKEND = ""; // set default if you like
+    // IMPORTANT: this is the path you previously uploaded in the session;
+    // your hosting environment / server-side tooling may transform this path to a usable URL.
+    const PRELOADED_CSV_PATH = "/mnt/data/intent.csv";
+
+    let backendUrl = localStorage.getItem("backendUrl") || DEFAULT_BACKEND;
+    const backendInput = document.getElementById("backend-url");
+    const saveBtn = document.getElementById("save-backend");
+    const filePicker = document.getElementById("file-picker");
+    const uploadBtn = document.getElementById("upload-btn");
+    const usePreloadedBtn = document.getElementById("use-preloaded");
+    const rebuildIndexBtn = document.getElementById("rebuild-index");
+    const messagesDiv = document.getElementById("messages");
+    const input = document.getElementById("message-input");
+    const sendBtn = document.getElementById("send");
+    const statusEl = document.getElementById("status");
+    const historyList = document.getElementById("history-list");
+    const saveMemoryBtn = document.getElementById("save-memory");
+    const clearMemoryBtn = document.getElementById("clear-memory");
+    const clearChatBtn = document.getElementById("clear-chat");
+    const downloadLogBtn = document.getElementById("download-log");
+
+    backendInput.value = backendUrl;
+
+    let memory = JSON.parse(localStorage.getItem("chat_memory_v1") || "[]"); // array of {title, messages}
+    let chatHistory = JSON.parse(localStorage.getItem("chat_history_v1") || "[]"); // full message objects for this session
+    let streaming = false;
+    const MAX_HISTORY_MESSAGES = 12; // how many messages to send to backend for context
+
+    /* -------------------------
+       UI UTILITIES
+       ------------------------- */
+    function setStatus(t) {
+      statusEl.textContent = "Status: " + t;
+    }
+    function clearMessages() {
+      messagesDiv.innerHTML = "";
+    }
+    function addMessage(text, who = "assistant", meta = null) {
+      const d = document.createElement("div");
+      d.className = "msg " + (who === "user" ? "user" : "assistant");
+      d.setAttribute("data-role", who);
+      d.textContent = text;
+      if (meta) {
+        const m = document.createElement("div");
+        m.className = "meta";
+        m.textContent = meta;
+        d.appendChild(document.createElement("br"));
+        d.appendChild(m);
+      }
+      messagesDiv.appendChild(d);
+      messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    }
+    function addStreamingMessageStarter(who = "assistant") {
+      const d = document.createElement("div");
+      d.className = "msg " + (who === "user" ? "user" : "assistant");
+      d.setAttribute("data-role", who);
+      d.textContent = "";
+      messagesDiv.appendChild(d);
+      messagesDiv.scrollTop = messagesDiv.scrollHeight;
+      return d;
+    }
+    function updateHistoryUI() {
+      historyList.innerHTML = "";
+      memory.slice().reverse().forEach((item, idx) => {
+        const el = document.createElement("div");
+        el.className = "history-item";
+        el.textContent = item.title || ("Memory " + (memory.length - idx));
+        el.addEventListener("click", () => {
+          // load messages into chat (append)
+          if (Array.isArray(item.messages)) {
+            item.messages.forEach(m => {
+              addMessage(m.content, m.role === "user" ? "user" : "assistant");
+            });
+          }
+        });
+        historyList.appendChild(el);
+      });
+    }
+    function downloadJSON(filename, obj) {
+      const a = document.createElement("a");
+      const blob = new Blob([JSON.stringify(obj, null, 2)], { type: "application/json" });
+      a.href = URL.createObjectURL(blob);
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
     }
 
-    async function sendQuery() {
-      const q = queryInput.value.trim();
-      if (!q) return;
-      appendMessage(q, 'user');
-      appendMessage('Thinking...', 'bot');
-      const url = (baseurl.value || '').replace(/\/$/, '') + '/predict';
-      const body = { query: q, top_k: parseInt(topk.value || '3') };
+    /* -------------------------
+       MEMORY / STORAGE
+       ------------------------- */
+    function saveMemorySlot() {
+      const title = prompt("Memory title (short):", (new Date()).toLocaleString());
+      if (!title) return;
+      memory.push({ title, messages: chatHistory.slice() });
+      localStorage.setItem("chat_memory_v1", JSON.stringify(memory));
+      updateHistoryUI();
+      setStatus("Memory saved");
+    }
+    function clearMemory() {
+      if (!confirm("Clear saved memory?")) return;
+      memory = [];
+      localStorage.removeItem("chat_memory_v1");
+      updateHistoryUI();
+      setStatus("Memory cleared");
+    }
+    function clearChat() {
+      if (!confirm("Clear current chat?")) return;
+      chatHistory = [];
+      localStorage.setItem("chat_history_v1", JSON.stringify(chatHistory));
+      clearMessages();
+      addMessage("Assistant ready. Set backend URL and press Save.", "assistant");
+      setStatus("Chat cleared");
+    }
 
+    /* -------------------------
+       BACKEND INTERACTIONS
+       ------------------------- */
+    function getBackendBase() {
+      return (backendUrl || "").replace(/\/$/, "");
+    }
+
+    // helper to call predict endpoint
+    async function callPredict(text, top_k = 3) {
+      const base = getBackendBase();
+      if (!base) throw new Error("Set backend URL first");
+      const resp = await fetch(base + "/predict", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, top_k })
+      });
+      if (!resp.ok) {
+        const txt = await resp.text();
+        throw new Error("Predict failed: " + txt);
+      }
+      const data = await resp.json();
+      return data;
+    }
+
+    // helper to call chat endpoint and get full reply
+    async function callChat(messages, model = "gpt-4o-mini", max_tokens = 250) {
+      const base = getBackendBase();
+      if (!base) throw new Error("Set backend URL first");
+      const resp = await fetch(base + "/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages, model, max_tokens })
+      });
+      if (!resp.ok) {
+        const txt = await resp.text();
+        throw new Error("Chat failed: " + txt);
+      }
+      const data = await resp.json();
+      return data;
+    }
+
+    /* -------------------------
+       STREAMING / TYPING EFFECT
+       -------------------------
+       Backend doesn't stream tokens; we simulate streaming by
+       progressively revealing the full reply text as a typing effect.
+       ------------------------- */
+    function simulateStreamingWrite(elementNode, fullText, speed = 18) {
+      return new Promise(resolve => {
+        let i = 0;
+        const step = () => {
+          const chunkSize = 1; // reveal one char at a time
+          if (i < fullText.length) {
+            elementNode.textContent += fullText.substr(i, chunkSize);
+            i += chunkSize;
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+            setTimeout(step, speed);
+          } else resolve();
+        };
+        step();
+      });
+    }
+
+    /* -------------------------
+       SMART chat: predict -> craft system prompt -> chat
+       ------------------------- */
+    async function smartChatSend(messageText) {
+      if (!backendUrl) { setStatus("Set backend URL first"); return; }
+      addMessage(messageText, "user");
+      chatHistory.push({ role: "user", content: messageText });
+      localStorage.setItem("chat_history_v1", JSON.stringify(chatHistory));
+
+      setStatus("Analyzing intent...");
+      let intentSummary = "No intent info available.";
       try {
-        const r = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        });
-        const textBub = chat.querySelectorAll('.bot .bub');
-        textBub[textBub.length - 1].innerText = ''; // clear 'Thinking...'
-
-        if (!r.ok) {
-          const err = await r.json().catch(() => ({ detail: r.statusText }));
-          appendMessage('Error: ' + (err.detail || r.statusText || 'unknown'), 'bot');
-          return;
+        const pred = await callPredict(messageText, 3);
+        if (pred && Array.isArray(pred.results) && pred.results.length) {
+          intentSummary = pred.results.map(r => `• ${r.intent || "unknown"} (score ${Number(r.score).toFixed(3)})`).join("\n");
         }
-        const data = await r.json();
-        if (!Array.isArray(data) || data.length === 0) {
-          appendMessage('No intents found.', 'bot');
-          resultsEl.innerHTML = '<em>No intents returned.</em>';
-          return;
-        }
-
-        // Show main bubble with top intent
-        appendMessage(`Top intent: ${data[0].intent} (score: ${data[0].score.toFixed(3)})`, 'bot');
-
-        // Show table below
-        resultsEl.innerHTML = '<strong>Top matches</strong>';
-        data.forEach(d => {
-          const row = document.createElement('div');
-          row.className = 'intent-row';
-          row.innerHTML = `<div style="font-weight:600">${d.intent}</div><div>${d.score.toFixed(3)}</div><div style="margin-left:12px;color:#6b7280">${d.text}</div>`;
-          resultsEl.appendChild(row);
-        });
-
       } catch (e) {
-        // network error
-        appendMessage('Network error: ' + e.message, 'bot');
-      } finally {
-        queryInput.value = '';
+        // predict can fail; continue without it
+        intentSummary = "Intent analysis unavailable.";
+        console.warn("predict error", e);
+      }
+
+      const systemPrompt =
+        "You are an expert office-management assistant. Use the intent analysis below to provide a helpful, concise answer. Do not reveal internal scores.\n\n" +
+        "INTENT ANALYSIS:\n" + intentSummary + "\n\nProvide a short, clear answer:";
+
+      // build messages: include limited recent history for context (memory)
+      const recentMessages = chatHistory.slice(-MAX_HISTORY_MESSAGES);
+      const messagesForModel = [{ role: "system", content: systemPrompt }];
+      // push previous pairs into history for context
+      recentMessages.forEach(m => messagesForModel.push({ role: m.role, content: m.content }));
+      // lastly the user message (already included as last in recentMessages, but safe)
+      // messagesForModel.push({role:"user", content: messageText});
+
+      setStatus("Generating reply...");
+      // show streaming placeholder
+      const streamNode = addStreamingMessageStarter("assistant");
+      try {
+        const data = await callChat(messagesForModel, "gpt-4o-mini", 240);
+        const fullReply = data.reply || "(no reply)";
+        chatHistory.push({ role: "assistant", content: fullReply });
+        localStorage.setItem("chat_history_v1", JSON.stringify(chatHistory));
+        // simulate streaming/typing effect
+        await simulateStreamingWrite(streamNode, fullReply, 12);
+        setStatus("Done");
+      } catch (err) {
+        streamNode.textContent = "Error: " + err.message;
+        setStatus("error");
       }
     }
 
-    sendBtn.addEventListener('click', sendQuery);
-    queryInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendQuery(); });
+    /* -------------------------
+       UI EVENT BINDINGS
+       ------------------------- */
+    saveBtn.addEventListener("click", () => {
+      backendUrl = backendInput.value.trim();
+      localStorage.setItem("backendUrl", backendUrl);
+      setStatus("Backend saved");
+    });
 
-    // upload CSV
-    uploadBtn.addEventListener('click', async () => {
-      const f = csvfile.files[0];
-      if (!f) { uploadMsg.innerText = 'Choose a CSV file first.'; return; }
-      uploadMsg.innerText = 'Uploading...';
-      const url = (baseurl.value || '').replace(/\/$/, '') + '/upload_intents';
+    uploadBtn.addEventListener("click", () => filePicker.click());
+    filePicker.addEventListener("change", async (ev) => {
+      const f = ev.target.files[0];
+      if (!f) return;
+      if (!backendUrl) { setStatus("Set backend URL first"); return; }
+      setStatus("Uploading CSV...");
       const fd = new FormData();
-      fd.append('file', f, f.name);
+      fd.append("file", f, f.name);
       try {
-        const r = await fetch(url, { method: 'POST', body: fd });
-        const j = await r.json();
-        if (!r.ok) {
-          uploadMsg.innerText = 'Upload failed: ' + (j.detail || r.statusText);
-        } else {
-          uploadMsg.innerText = `OK — ${j.num_examples} examples loaded.`;
-        }
-      } catch (err) {
-        uploadMsg.innerText = 'Upload error: ' + err.message;
+        const res = await fetch(getBackendBase() + "/upload_intents", { method: "POST", body: fd });
+        const data = await res.json();
+        if (res.ok) { setStatus("Index built: " + (data.entries || 0)); addMessage("Index built on server.", "assistant"); }
+        else { setStatus("Upload failed"); addMessage("Upload failed: " + JSON.stringify(data), "assistant"); }
+      } catch (e) {
+        setStatus("upload error"); addMessage("Upload error: " + e.message, "assistant");
       }
     });
+
+    usePreloadedBtn.addEventListener("click", async () => {
+      // We post JSON { url: PRELOADED_CSV_PATH } to /upload_intents.
+      // Server must accept JSON body and fetch the URL path; if not, this may fail.
+      if (!backendUrl) { setStatus("Set backend URL first"); return; }
+      setStatus("Requesting server to build from preloaded CSV...");
+      try {
+        const res = await fetch(getBackendBase() + "/upload_intents", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: PRELOADED_CSV_PATH })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setStatus("Index built from preloaded CSV (" + (data.entries || "N/A") + ")");
+          addMessage("Index built on server from preloaded CSV.", "assistant");
+        } else {
+          const txt = await res.text();
+          setStatus("preload failed");
+          addMessage("Preload failed: " + txt, "assistant");
+        }
+      } catch (e) {
+        setStatus("preload error"); addMessage("Preload error: " + e.message, "assistant");
+      }
+    });
+
+    rebuildIndexBtn.addEventListener("click", async () => {
+      // same as usePreloaded but explicit
+      usePreloadedBtn.click();
+    });
+
+    sendBtn.addEventListener("click", () => {
+      const txt = input.value.trim();
+      if (txt) { smartChatSend(txt); input.value = ""; }
+    });
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        const txt = input.value.trim();
+        if (txt) { smartChatSend(txt); input.value = ""; }
+      }
+    });
+
+    saveMemoryBtn.addEventListener("click", saveMemorySlot);
+    clearMemoryBtn.addEventListener("click", clearMemory);
+    clearChatBtn.addEventListener("click", clearChat);
+    downloadLogBtn.addEventListener("click", () => downloadJSON("chat_history.json", chatHistory));
+
+    /* -------------------------
+       ON LOAD: restore history & memory UI
+       ------------------------- */
+    (function init() {
+      updateHistoryUI();
+      // restore session messages if any
+      if (chatHistory.length) {
+        chatHistory.forEach(m => addMessage(m.content, m.role === "user" ? "user" : "assistant"));
+      } else {
+        addMessage("Assistant ready. Set backend URL and press Save.", "assistant");
+      }
+      setStatus("idle");
+    })();
   </script>
 </body>
 
